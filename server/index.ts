@@ -1,13 +1,24 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+import { createClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 
 dotenv.config();
 
 const app = express();
-const prisma = new PrismaClient();
+// Initialize Supabase Client
+// Ensure SUPABASE_URL and SUPABASE_SERVICE_KEY are in your .env file
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+    console.error("Missing Supabase URL or Key in environment variables.");
+    process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
@@ -20,16 +31,13 @@ app.get('/health', (req, res) => {
 
 // --- ADMIN API ---
 
-// Admin Login (Simple hardcoded for now, can be expanded to DB later)
+// Admin Login
 app.post('/api/login', async (req, res) => {
-    // TODO: Use DB-based auth in production
-    // For now, checks env var or default
     const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@valentine.com';
     const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'love123';
 
     const { email, password } = req.body;
     if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-        // Return a simple mock token
         res.json({ token: 'valid-session-token', user: { email: ADMIN_EMAIL } });
     } else {
         res.status(401).json({ error: 'Invalid credentials' });
@@ -39,10 +47,13 @@ app.post('/api/login', async (req, res) => {
 // List all messages (Admin only)
 app.get('/api/messages', async (req, res) => {
     try {
-        const messages = await prisma.message.findMany({
-            orderBy: { createdAt: 'desc' }
-        });
-        res.json(messages);
+        const { data, error } = await supabase
+            .from('Message')
+            .select('*')
+            .order('createdAt', { ascending: false });
+
+        if (error) throw error;
+        res.json(data);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to fetch messages' });
@@ -53,22 +64,26 @@ app.get('/api/messages', async (req, res) => {
 app.post('/api/messages', async (req, res) => {
     try {
         const { recipientName, content, mediaUrl, expiresAt } = req.body;
-        const message = await prisma.message.create({
-            data: {
+
+        const { data, error } = await supabase
+            .from('Message')
+            .insert({
                 recipientName,
                 content,
                 mediaUrl,
                 expiresAt: expiresAt ? new Date(expiresAt) : null,
-            },
-        });
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
 
         // Generate QR Code Data URL
-        // In prod, this URL should point to the deployed frontend
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        const accessUrl = `${frontendUrl}/m/${message.id}`;
+        const accessUrl = `${frontendUrl}/m/${data.id}`;
         const qrCodeDataUrl = await QRCode.toDataURL(accessUrl);
 
-        res.json({ ...message, accessUrl, qrCodeDataUrl });
+        res.json({ ...data, accessUrl, qrCodeDataUrl });
     } catch (error) {
         console.error("Create Message Error:", error);
         res.status(500).json({ error: 'Failed to create message' });
@@ -79,7 +94,12 @@ app.post('/api/messages', async (req, res) => {
 app.delete('/api/messages/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        await prisma.message.delete({ where: { id } });
+        const { error } = await supabase
+            .from('Message')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: 'Failed to delete message' });
@@ -92,27 +112,28 @@ app.delete('/api/messages/:id', async (req, res) => {
 app.get('/api/public/messages/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const message = await prisma.message.findUnique({
-            where: { id },
-        });
+        const { data: message, error } = await supabase
+            .from('Message')
+            .select('*')
+            .eq('id', id)
+            .single();
 
-        if (!message) {
+        if (error || !message) {
             return res.status(404).json({ error: 'Message not found' });
         }
 
         // Check expiration
-        if (message.expiresAt && new Date() > message.expiresAt) {
+        if (message.expiresAt && new Date() > new Date(message.expiresAt)) {
             return res.status(410).json({ error: 'This message has faded away...' });
         }
 
-        // Mark as viewed (update asynchronously to not block response)
-        // We only mark it if it wasn't viewed, or just update last viewed count if we had one.
-        // For now, just setting isViewed = true
+        // Mark as viewed
         if (!message.isViewed) {
-            await prisma.message.update({
-                where: { id },
-                data: { isViewed: true }
-            });
+            // Fire and forget update (or await if strict consistency needed)
+            await supabase
+                .from('Message')
+                .update({ isViewed: true })
+                .eq('id', id);
         }
 
         res.json(message);
@@ -120,8 +141,6 @@ app.get('/api/public/messages/:id', async (req, res) => {
         res.status(500).json({ error: 'Error fetching message' });
     }
 });
-
-
 
 if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
