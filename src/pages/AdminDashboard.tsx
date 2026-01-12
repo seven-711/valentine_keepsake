@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../supabase';
 
 interface Message {
     id: string;
@@ -25,13 +26,17 @@ const AdminDashboard = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        if (!token) {
-            navigate('/');
-            return;
-        }
-        loadMessages();
+        checkSession();
     }, [navigate]);
+
+    const checkSession = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+            navigate('/');
+        } else {
+            loadMessages();
+        }
+    };
 
     const loadMessages = async () => {
         try {

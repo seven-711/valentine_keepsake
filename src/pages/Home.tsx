@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../api';
+import { supabase } from '../supabase';
 
 const Home = () => {
     const navigate = useNavigate();
@@ -11,11 +11,22 @@ const Home = () => {
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            const data = await api.login(email, password);
-            localStorage.setItem('token', data.token);
-            navigate('/admin/dashboard');
-        } catch (err) {
-            setError('Invalid email or password');
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+
+            if (error) throw error;
+
+            if (data.session) {
+                // Store Supabase session or just navigate. 
+                // Using Supabase client automatically handles session persistence in multiple tabs/refresh.
+                // We'll just navigate to dashboard.
+                navigate('/admin/dashboard');
+            }
+        } catch (err: any) {
+            console.error(err);
+            setError(err.message || 'Invalid email or password');
         }
     };
 
@@ -36,7 +47,7 @@ const Home = () => {
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             className="w-full rounded-lg border-gray-300 shadow-sm focus:border-love-red focus:ring-love-red p-3 border outline-none transition-colors"
-                            placeholder="admin@valentine.com"
+                            placeholder="email@valentine.com"
                         />
                     </div>
                     <div>
@@ -51,11 +62,8 @@ const Home = () => {
                         />
                     </div>
                     <button type="submit" className="w-full bg-love-red text-white py-3 rounded-lg hover:bg-pink-700 transition-all font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5">
-                        Enter Integration
+                        Login
                     </button>
-                    <div className="text-center text-xs text-gray-400 mt-4">
-                        Default: admin@valentine.com / love123
-                    </div>
                 </form>
             </div>
         </div>
