@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
+import QRCode from 'qrcode';
 
 interface Message {
     id: string;
@@ -40,8 +40,17 @@ const AdminDashboard = () => {
 
     const loadMessages = async () => {
         try {
-            const data = await api.getMessages();
-            setMessages(data);
+            const { data, error } = await supabase
+                .from('Message')
+                .select('*')
+                .order('createdAt', { ascending: false });
+
+            if (error) throw error;
+
+            setMessages(data.map((m: any) => ({
+                ...m,
+                createdAt: new Date(m.createdAt)
+            })));
         } catch (err) {
             console.error(err);
         } finally {
@@ -52,7 +61,8 @@ const AdminDashboard = () => {
     const handleDelete = async (id: string) => {
         if (!confirm('Are you sure?')) return;
         try {
-            await api.deleteMessage(id);
+            const { error } = await supabase.from('Message').delete().eq('id', id);
+            if (error) throw error;
             setMessages(messages.filter(m => m.id !== id));
         } catch (err) {
             alert('Failed to delete');
@@ -62,18 +72,35 @@ const AdminDashboard = () => {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            const res = await api.createMessage({
-                recipientName,
-                content,
-                mediaUrl
-            });
-            setMessages([res, ...messages]);
-            setCreatedQrData(res.qrCodeDataUrl);
+            // 1. Insert into Supabase
+            const { data, error } = await supabase
+                .from('Message')
+                .insert({
+                    recipientName,
+                    content,
+                    mediaUrl,
+                    // expiresAt: ... (if you have expiration input later)
+                })
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            // 2. Generate QR Code (Client Side)
+            const accessUrl = `${window.location.origin}/m/${data.id}`;
+            const qrCodeDataUrl = await QRCode.toDataURL(accessUrl);
+
+            // 3. Update State
+            const newMessage = { ...data, createdAt: new Date(data.createdAt) };
+            setMessages([newMessage, ...messages]);
+            setCreatedQrData(qrCodeDataUrl);
             setRecipientName('');
             setContent('');
             setMediaUrl('');
-        } catch (err) {
-            alert('Error creating message');
+
+        } catch (err: any) {
+            console.error(err);
+            alert(`Error creating message: ${err.message}`);
         }
     };
 

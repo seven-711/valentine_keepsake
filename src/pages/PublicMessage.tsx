@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { api } from '../api';
+import { supabase } from '../supabase';
 
 const PublicMessage = () => {
     const { id } = useParams();
@@ -10,12 +10,38 @@ const PublicMessage = () => {
 
     useEffect(() => {
         if (id) {
-            api.getPublicMessage(id)
-                .then(setMessage)
-                .catch(err => setError(err.message))
-                .finally(() => setLoading(false));
+            loadMessage();
         }
     }, [id]);
+
+    const loadMessage = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('Message')
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            if (error) throw error;
+            if (!data) throw new Error('Message not found');
+
+            // Check Expiry
+            if (data.expiresAt && new Date() > new Date(data.expiresAt)) {
+                throw new Error('This message has faded away...');
+            }
+
+            setMessage(data);
+
+            // Mark as viewed
+            if (!data.isViewed) {
+                await supabase.from('Message').update({ isViewed: true }).eq('id', id);
+            }
+        } catch (err: any) {
+            setError(err.message || 'Error loading message');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center bg-soft-pink">
