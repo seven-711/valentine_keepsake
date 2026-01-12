@@ -4,7 +4,10 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-    throw new Error('Missing Supabase Environment Variables');
+    const missing = [];
+    if (!supabaseUrl) missing.push('VITE_SUPABASE_URL');
+    if (!supabaseKey) missing.push('VITE_SUPABASE_ANON_KEY');
+    throw new Error(`Missing Supabase Environment Variables: ${missing.join(', ')}`);
 }
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
